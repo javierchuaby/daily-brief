@@ -1,0 +1,50 @@
+# Virtual environment
+venv/
+.env
+.env.local
+
+# Credentials (never commit!)
+
+# Data output (contains your personal data)
+data/
+data-*/  # Match any date-stamped folders
+
+# Logs
+logs/
+*.log
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+*.tmp
+
+# Python cache
+__pycache__/
+*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Package build files
+*.egg-info/
+dist/
+build/
+
+# Cache files
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# External dependencies (git submodules or embedded repos)
+src/coursemology-py/

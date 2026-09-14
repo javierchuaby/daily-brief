@@ -1,0 +1,4 @@
+python-dotenv
+pytest>=7.0.0
+coursemology-py @ git+https://github.com/rizkiarm/coursemology-py.git
+mistune

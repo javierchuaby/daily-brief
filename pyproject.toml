@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daily-brief"
+version = "0.1.0"
+description = "Daily brief automation system for Canvas, Coursemology, and email"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-dotenv",
+    "coursemology-py",
+]
+
+[project.scripts]
+daily-brief = "daily_brief.main:main"
+
+[project.urls]
+Homepage = "https://github.com/your-username/daily-brief"
+Issues = "https://github.com/your-username/daily-brief/issues"
+Source = "https://github.com/your-username/daily-brief"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
