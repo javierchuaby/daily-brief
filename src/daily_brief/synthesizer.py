@@ -42,7 +42,6 @@ def synthesize_brief_with_opencode(
     tomorrow = ref_date + datetime.timedelta(days=1)
     end_of_week = ref_date + datetime.timedelta(days=(6 - ref_date.weekday()))
     past_cutoff = ref_date - datetime.timedelta(days=7)
-
     # Embed the raw data directly in the prompt (no file path references)
     data_json = json.dumps(raw_data, indent=2, default=str)
 
@@ -54,6 +53,7 @@ TEMPORAL ANCHORS:
 - Tomorrow: {tomorrow.isoformat()}
 - End of Current Week (Sunday): {end_of_week.isoformat()}
 - Recent Updates Cutoff: {past_cutoff.isoformat()}
+- Timezone: All dates and times in the DATA below are in SGT (UTC+8, Asia/Singapore). Never convert or reinterpret them.
 
 CLASSIFICATION RULES:
 1. URGENT:

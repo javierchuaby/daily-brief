@@ -5,13 +5,22 @@ Canvas API Integration Module
 Provides functions to fetch data from NUS Canvas API.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 import requests
 from requests.exceptions import HTTPError, Timeout
 
-from daily_brief.utils import parse_due_date, safe_get_field, safe_get_list
+from daily_brief.utils import (
+    SGT,
+    format_sgt,
+    parse_due_date,
+    parse_sgt_datetime,
+    safe_get_field,
+    safe_get_list,
+    strip_html_preserve_urls,
+    to_sgt,
+)
 
 
 class CanvasClient:
@@ -93,7 +102,10 @@ def format_announcement(announcement: Dict[str, Any]) -> str:
     message = announcement.get("message", "")[:200]  # Truncate to 200 chars
     posted_at = announcement.get("posted_at", "")
 
-    return f"- **{title}** ({posted_at[:10]})\n  {message[:100]}..."
+    posted_sgt = parse_sgt_datetime(posted_at)
+    date_str = posted_sgt.strftime("%Y-%m-%d") if posted_sgt else posted_at[:10]
+
+    return f"- **{title}** ({date_str})\n  {message[:100]}..."
 
 
 def format_assignment(assignment: Dict[str, Any]) -> str:
@@ -105,7 +117,9 @@ def format_assignment(assignment: Dict[str, Any]) -> str:
 
     due_date, days_remaining = parse_due_date(due_at)
     if due_date:
-        due_str = f"{due_at[:10]} (in {days_remaining} days)"
+        due_str = (
+            f"{due_date.strftime('%Y-%m-%d %H:%M')} SGT (in {days_remaining} days)"
+        )
     else:
         due_str = "No due date"
 
@@ -121,7 +135,9 @@ def format_quiz(quiz: Dict[str, Any]) -> str:
 
     due_date, days_remaining = parse_due_date(due_at)
     if due_date:
-        due_str = f"{due_at[:10]} (in {days_remaining} days)"
+        due_str = (
+            f"{due_date.strftime('%Y-%m-%d %H:%M')} SGT (in {days_remaining} days)"
+        )
     else:
         due_str = "No due date"
 
@@ -139,27 +155,45 @@ def extract_announcements_data(
     for a in announcements:
         # Handle Canvas-style dict
         if isinstance(a, dict):
+            posted_at_str = a.get("posted_at", "")
+            posted_dt = parse_sgt_datetime(posted_at_str)
+            if posted_dt:
+                days_old = (datetime.now(SGT).date() - posted_dt.date()).days
+                if days_old > 7:
+                    continue
+
             data.append(
                 {
                     "id": a.get("id"),
                     "title": a.get("title", ""),
-                    "message": a.get("message", ""),
-                    "posted_at": a.get("posted_at", ""),
+                    "message": strip_html_preserve_urls(a.get("message", "")),
+                    "posted_at": format_sgt(posted_at_str),
                     "is_pinned": a.get("is_pinned", False),
-                    "created_at": a.get("created_at", ""),
+                    "created_at": format_sgt(a.get("created_at", "")),
                     "context_code": a.get("context_code", ""),
                 }
             )
         # Handle Coursemology Announcement Pydantic model
         else:
+            start_time = getattr(a, "start_time", None)
+            if isinstance(start_time, str):
+                start_time = parse_sgt_datetime(start_time)
+            else:
+                start_time = to_sgt(start_time, SGT)
+
+            if start_time:
+                days_old = (datetime.now(SGT).date() - start_time.date()).days
+                if days_old > 7:
+                    continue
+
             data.append(
                 {
                     "id": getattr(a, "id", None),
                     "title": getattr(a, "title", ""),
-                    "message": getattr(a, "content", ""),
-                    "posted_at": getattr(a, "start_time", None),
+                    "message": strip_html_preserve_urls(getattr(a, "content", "")),
+                    "posted_at": start_time.isoformat() if start_time else None,
                     "is_pinned": getattr(a, "is_sticky", False),
-                    "created_at": getattr(a, "start_time", None),
+                    "created_at": start_time.isoformat() if start_time else None,
                     "context_code": "",
                 }
             )
@@ -170,14 +204,22 @@ def extract_assignments_data(assignments: List[Dict[str, Any]]) -> List[Dict[str
     """Extract fine-grained assignment data for AI processing."""
     data = []
     for a in assignments:
+        if a.get("has_submitted_submissions"):
+            continue
+
         due_at = a.get("due_at", "")
         due_date, days_remaining = parse_due_date(due_at)
+
+        # If past due by more than 7 days, filter it out
+        if days_remaining is not None and days_remaining < -7:
+            continue
 
         data.append(
             {
                 "id": a.get("id"),
                 "name": a.get("name", ""),
-                "due_at": due_at,
+                "description": strip_html_preserve_urls(a.get("description", "")),
+                "due_at": format_sgt(due_at),
                 "due_date": due_date.isoformat() if due_date else None,
                 "days_remaining": days_remaining,
                 "points_possible": safe_get_field(a, "points_possible", 0),
@@ -185,8 +227,8 @@ def extract_assignments_data(assignments: List[Dict[str, Any]]) -> List[Dict[str
                 "published": safe_get_field(a, "published", False),
                 "submissions_count": safe_get_field(a, "submissions_count", 0),
                 "submission_types": safe_get_field(a, "submission_types", []),
-                "lock_at": safe_get_field(a, "lock_at", ""),
-                "unlock_at": safe_get_field(a, "unlock_at", ""),
+                "lock_at": format_sgt(safe_get_field(a, "lock_at", None)),  # type: ignore
+                "unlock_at": format_sgt(safe_get_field(a, "unlock_at", None)),  # type: ignore
                 "assignment_group_id": safe_get_field(a, "assignment_group_id", None),
             }
         )
@@ -197,14 +239,21 @@ def extract_quizzes_data(quizzes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Extract fine-grained quiz data for AI processing."""
     data = []
     for q in quizzes:
+        if q.get("has_submitted_submissions"):
+            continue
+
         due_at = q.get("due_at", "")
         due_date, days_remaining = parse_due_date(due_at)
+
+        if days_remaining is not None and days_remaining < -7:
+            continue
 
         data.append(
             {
                 "id": q.get("id"),
                 "title": q.get("title", ""),
-                "due_at": due_at,
+                "description": strip_html_preserve_urls(q.get("description", "")),
+                "due_at": format_sgt(due_at),
                 "due_date": due_date.isoformat() if due_date else None,
                 "days_remaining": days_remaining,
                 "question_count": safe_get_field(q, "question_count", 0),
@@ -212,8 +261,8 @@ def extract_quizzes_data(quizzes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "allowed_attempts": safe_get_field(q, "allowed_attempts", 1),
                 "quiz_type": safe_get_field(q, "quiz_type", ""),
                 "published": safe_get_field(q, "published", False),
-                "lock_at": safe_get_field(q, "lock_at", ""),
-                "unlock_at": safe_get_field(q, "unlock_at", ""),
+                "lock_at": format_sgt(safe_get_field(q, "lock_at", None)),  # type: ignore
+                "unlock_at": format_sgt(safe_get_field(q, "unlock_at", None)),  # type: ignore
             }
         )
     return data
@@ -240,8 +289,8 @@ def generate_course_markdown(
     assignments_section = "## Assignments\n\n"
     assignments_list = safe_get_list(assignments, "assignments")
     if assignments_list:
-        # Filter upcoming assignments (use UTC to match timezone-aware due dates)
-        today = datetime.now(timezone.utc)
+        # Filter upcoming assignments (SGT now matches SGT-converted due dates)
+        today = datetime.now(SGT)
         upcoming = [
             a
             for a in assignments_list
@@ -262,8 +311,8 @@ def generate_course_markdown(
     quizzes_section = "## Quizzes\n\n"
     quizzes_list = safe_get_list(quizzes, "quizzes")
     if quizzes_list:
-        # Filter upcoming quizzes (use UTC to match timezone-aware due dates)
-        today = datetime.now(timezone.utc)
+        # Filter upcoming quizzes (SGT now matches SGT-converted due dates)
+        today = datetime.now(SGT)
         upcoming = [
             q
             for q in quizzes_list

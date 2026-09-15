@@ -78,3 +78,78 @@ class TestCanvasAPIFunctions:
         formatted = format_quiz(quiz)
         assert "Quiz 2" in formatted
         assert "No due date" in formatted
+
+
+class TestSgtConversion:
+    """Test that extracted Canvas data is normalized to SGT."""
+
+    def test_extract_assignments_due_at_converted_to_sgt(self):
+        from daily_brief.canvas.api import extract_assignments_data
+
+        assignments = [
+            {
+                "id": 1,
+                "name": "Assignment2",
+                "due_at": "2026-09-14T15:59:59Z",  # 23:59:59 SGT same day
+                "points_possible": 25,
+                "published": True,
+            }
+        ]
+
+        data = extract_assignments_data(assignments)
+
+        assert data[0]["due_at"] == "2026-09-14T23:59:59+08:00"
+        assert data[0]["due_date"] == "2026-09-14T23:59:59+08:00"
+
+    def test_extract_quizzes_due_date_rolls_over_midnight(self):
+        from daily_brief.canvas.api import extract_quizzes_data
+
+        quizzes = [
+            {
+                "id": 1,
+                "title": "Lab 4 Pre-Lab Quiz",
+                "due_at": "2026-09-14T22:00:00Z",  # 06:00 SGT next day
+                "question_count": 4,
+                "time_limit": 180,
+                "allowed_attempts": 1,
+                "published": True,
+            }
+        ]
+
+        data = extract_quizzes_data(quizzes)
+
+        assert data[0]["due_at"] == "2026-09-15T06:00:00+08:00"
+        assert data[0]["due_date"].startswith("2026-09-15")
+
+    def test_extract_announcements_posted_at_converted(self):
+        from daily_brief.canvas.api import extract_announcements_data
+
+        announcements = [
+            {
+                "id": 1,
+                "title": "Announcement",
+                "message": "Hello",
+                "posted_at": "2026-09-13T11:23:37Z",  # 19:23 SGT same day
+                "is_pinned": False,
+                "created_at": "2026-09-13T11:23:37Z",
+                "context_code": "course_1",
+            }
+        ]
+
+        data = extract_announcements_data(announcements)
+
+        assert data[0]["posted_at"] == "2026-09-13T19:23:37+08:00"
+        assert data[0]["created_at"] == "2026-09-13T19:23:37+08:00"
+
+    def test_format_assignment_shows_sgt_time(self):
+        from daily_brief.canvas.api import format_assignment
+
+        assignment = {
+            "name": "Assignment 2",
+            "due_at": "2026-09-14T15:59:59Z",
+            "points_possible": 25,
+            "submissions_count": 0,
+        }
+
+        formatted = format_assignment(assignment)
+        assert "2026-09-14 23:59 SGT" in formatted

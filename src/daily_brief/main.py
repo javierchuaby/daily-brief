@@ -24,6 +24,7 @@ from daily_brief.coursemology import (
 )
 from daily_brief.interfaces import AIService, EmailSender, StorageInterface
 from daily_brief.services import FileStorage, GmailSender, OpenCodeAIService
+from daily_brief.utils import SGT, parse_sgt_datetime, strip_html_preserve_urls
 
 
 def _extract_deadlines(content: str, source_name: str) -> tuple[list[str], list[str]]:
@@ -111,14 +112,14 @@ class BriefOrchestrator:
         return synthesize_brief_with_opencode(data, current_date_str, data_folder)
 
     def _send_brief(self, content: str) -> bool:
-        subject = f"Daily Brief - {datetime.now().strftime('%Y-%m-%d')}"
+        subject = f"Daily Brief - {datetime.now(SGT).strftime('%Y-%m-%d')}"
         recipient = get_env_var("RECIPIENT_EMAIL")
         return self.services.email_sender.send(recipient, subject, content)
 
 
 def generate_brief(data_folder: Path) -> str:
     """Generate daily brief from Canvas and Coursemology data."""
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(SGT).strftime("%Y-%m-%d")
     lines = [f"# Daily Brief - {today}", ""]
 
     lines.append("## 🚨 Urgent Deadlines (Today/Tomorrow)")
@@ -201,14 +202,14 @@ def generate_brief(data_folder: Path) -> str:
     lines.append("")
 
     lines.append("---")
-    lines.append(f"*Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+    lines.append(f"*Generated on {datetime.now(SGT).strftime('%Y-%m-%d %H:%M:%S')}*")
 
     return "\n".join(lines)
 
 
 def generate_raw_data(data_folder: Path) -> Dict[str, Any]:
     data: Dict[str, Any] = {
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": datetime.now(SGT).isoformat(),
         "canvas": {},
         "coursemology": "",
     }
@@ -388,6 +389,55 @@ def fetch_fine_grained_data_impl(data_folder: Path) -> Dict[str, Any]:
                 assessments.assessments
             )
 
+            # Fetch Lecture Trainings (Category 4811)
+            try:
+                lecture_trainings = course_api.assessment.assessments.index(
+                    category_id=4811
+                )
+                data["coursemology"]["lecture_trainings"] = extract_assessments_data(
+                    lecture_trainings.assessments
+                )
+            except Exception as e:
+                print(f"   ✗ Failed to fetch Lecture Trainings: {e}")
+                data["coursemology"]["lecture_trainings"] = []
+
+            # Fetch Surveys (Direct API Call)
+            try:
+                base_url = course_api.assessment._base_url
+                url = f"{base_url.rstrip('/')}/courses/{course_id}/surveys"
+                raw_resp = course_api.assessment._session.get(
+                    url, params={"format": "json"}
+                )
+                if raw_resp.status_code == 200:
+                    raw_data = raw_resp.json()
+
+                    filtered_surveys = []
+                    for survey in raw_data.get("surveys", []):
+                        if survey.get("response") is not None:
+                            continue
+
+                        end_at = survey.get("end_at")
+                        if end_at:
+                            due_dt = parse_sgt_datetime(end_at)
+                            if due_dt:
+                                days_old = (
+                                    datetime.now(SGT).date() - due_dt.date()
+                                ).days
+                                if days_old > 7:
+                                    continue
+
+                        desc = survey.get("description", "")
+                        if desc:
+                            survey["description"] = strip_html_preserve_urls(desc)
+                        filtered_surveys.append(survey)
+
+                    data["coursemology"]["surveys"] = filtered_surveys
+                else:
+                    data["coursemology"]["surveys"] = []
+            except Exception as e:
+                print(f"   ✗ Failed to fetch Surveys: {e}")
+                data["coursemology"]["surveys"] = []
+
             # Fetch submissions - handle Pydantic validation issues
             try:
                 submissions = course_api.submissions.index()
@@ -448,12 +498,12 @@ def save_fine_grained_data(data_folder: Path, data: Dict[str, Any]) -> None:
 
 def main(dry_run: bool = False, verbose: bool = False) -> int:
     print(f"\n{'=' * 60}")
-    print(f"Daily Brief Automation - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Daily Brief Automation - {datetime.now(SGT).strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'=' * 60}\n")
 
     print("[1/2] Setting up directories...")
     ensure_directories()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(SGT).strftime("%Y-%m-%d")
     date_folder = DATA_DIR / today
     date_folder.mkdir(exist_ok=True)
     latest = DATA_DIR / "latest"

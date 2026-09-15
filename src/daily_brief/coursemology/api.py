@@ -14,6 +14,17 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
+from daily_brief.utils import SGT, parse_sgt_datetime, strip_html_preserve_urls, to_sgt
+
+
+def _as_sgt(value: Any) -> Any:
+    """Normalize a datetime or ISO string to an SGT-aware datetime."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return parse_sgt_datetime(value)
+    return to_sgt(value, SGT)
+
 
 def fetch_coursemology_data(username: str, password: str, course_id: int = 0) -> str:
     """Fetch data from Coursemology and return Markdown content.
@@ -59,10 +70,11 @@ def fetch_coursemology_data(username: str, password: str, course_id: int = 0) ->
         announcements_section = "## Announcements\n\n"
         if announcements.announcements:
             for a in announcements.announcements[:5]:
+                start_sgt = to_sgt(a.start_time, SGT) if a.start_time else None
                 date = (
-                    a.start_time.strftime("%Y-%m-%d")
-                    if a.start_time
-                    else datetime.now().strftime("%Y-%m-%d")
+                    start_sgt.strftime("%Y-%m-%d")
+                    if start_sgt
+                    else datetime.now(SGT).strftime("%Y-%m-%d")
                 )
                 announcements_section += f"- **{a.title}** ({date})\n\n"
         else:
@@ -74,9 +86,13 @@ def fetch_coursemology_data(username: str, password: str, course_id: int = 0) ->
             for a in assessments.assessments[:10]:
                 due_date = None
                 if a.end_at and hasattr(a.end_at, "effective_time"):
-                    due_date = a.end_at.effective_time.strftime("%Y-%m-%d")
+                    sgt_dt = to_sgt(a.end_at.effective_time, SGT)
+                    if sgt_dt:
+                        due_date = sgt_dt.strftime("%Y-%m-%d")
                 elif a.end_at:
-                    due_date = a.end_at.strftime("%Y-%m-%d")
+                    sgt_dt = to_sgt(a.end_at, SGT)
+                    if sgt_dt:
+                        due_date = sgt_dt.strftime("%Y-%m-%d")
                 assessments_section += (
                     f"- **{a.title}**\n  Due: {due_date or 'No due date'}\n\n"
                 )
@@ -129,14 +145,16 @@ def extract_announcements_data(announcements: Any) -> List[Dict[str, Any]]:
 
         start_time = _get_attr(a, "start_time")
         end_time = _get_attr(a, "end_time")
+        start_time_sgt = _as_sgt(start_time)
+        end_time_sgt = _as_sgt(end_time)
 
         data.append(
             {
                 "id": _get_attr(a, "id"),
                 "title": _get_attr(a, "title"),
                 "content": _get_attr(a, "content"),
-                "start_time": start_time.isoformat() if start_time else None,
-                "end_time": end_time.isoformat() if end_time else None,
+                "start_time": start_time_sgt.isoformat() if start_time_sgt else None,
+                "end_time": end_time_sgt.isoformat() if end_time_sgt else None,
                 "is_unread": _get_attr(a, "is_unread"),
                 "is_pinned": _get_attr(a, "is_sticky"),
                 "creator": creator_data,
@@ -157,21 +175,33 @@ def extract_assessments_data(assessments: Any) -> List[Dict[str, Any]]:
     )
 
     for a in items:
+        status = _get_attr(a, "status")
+        if status in ["submitted", "graded"]:
+            continue
+
         end_at = _get_attr(a, "end_at")
-        due_date = None
+        due_dt = None
         if end_at:
             if hasattr(end_at, "effective_time") and end_at.effective_time:
-                due_date = end_at.effective_time.isoformat()
+                due_dt = end_at.effective_time
             elif hasattr(end_at, "isoformat"):
-                due_date = end_at.isoformat()
+                due_dt = end_at
+        due_date = _as_sgt(due_dt)
 
         start_at = _get_attr(a, "start_at")
-        start_date = None
+        start_dt = None
         if start_at:
             if hasattr(start_at, "effective_time") and start_at.effective_time:
-                start_date = start_at.effective_time.isoformat()
+                start_dt = start_at.effective_time
             elif hasattr(start_at, "isoformat"):
-                start_date = start_at.isoformat()
+                start_dt = start_at
+        start_date = _as_sgt(start_dt)
+
+        # Check if deadline is older than 7 days (ignore start_date for filtering)
+        if due_date:
+            days_old = (datetime.now(SGT).date() - due_date.date()).days
+            if days_old > 7:
+                continue
 
         time_limit = _get_attr(a, "time_limit")
 
@@ -179,13 +209,13 @@ def extract_assessments_data(assessments: Any) -> List[Dict[str, Any]]:
             {
                 "id": _get_attr(a, "id"),
                 "title": _get_attr(a, "title"),
-                "description": _get_attr(a, "description"),
-                "start_date": start_date,
-                "due_date": due_date,
+                "description": strip_html_preserve_urls(_get_attr(a, "description")),
+                "start_date": start_date.isoformat() if start_date else None,
+                "due_date": due_date.isoformat() if due_date else None,
                 "time_limit": time_limit,
                 "published": _get_attr(a, "published"),
                 "autograded": _get_attr(a, "autograded"),
-                "status": _get_attr(a, "status"),
+                "status": status,
                 "base_exp": _get_attr(a, "base_exp"),
                 "time_bonus_exp": _get_attr(a, "time_bonus_exp"),
             }
@@ -204,11 +234,9 @@ def extract_submissions_data(submissions: Any) -> List[Dict[str, Any]]:
     )
 
     for s in items:
-        submitted_at = None
         submitted_at_val = _get_attr(s, "submitted_at")
-        if submitted_at_val:
-            if hasattr(submitted_at_val, "isoformat"):
-                submitted_at = submitted_at_val.isoformat()
+        submitted_at_sgt = _as_sgt(submitted_at_val)
+        submitted_at = submitted_at_sgt.isoformat() if submitted_at_sgt else None
 
         data.append(
             {
