@@ -153,3 +153,33 @@ class TestSgtConversion:
 
         formatted = format_assignment(assignment)
         assert "2026-09-14 23:59 SGT" in formatted
+
+    def test_extract_assignments_filters_submitted_only_when_user_submitted(self):
+        from daily_brief.canvas.api import extract_assignments_data
+
+        assignments = [
+            {
+                "id": 1,
+                "name": "Unsubmitted Assignment (cohort has submissions)",
+                "due_at": "2026-09-18T10:00:00Z",
+                "has_submitted_submissions": True,
+                "submission": {
+                    "workflow_state": "unsubmitted",
+                    "submitted_at": None,
+                },
+            },
+            {
+                "id": 2,
+                "name": "Actually Submitted Assignment",
+                "due_at": "2026-09-18T10:00:00Z",
+                "has_submitted_submissions": True,
+                "submission": {
+                    "workflow_state": "submitted",
+                    "submitted_at": "2026-09-04T07:51:25Z",
+                },
+            },
+        ]
+
+        data = extract_assignments_data(assignments)
+        assert len(data) == 1
+        assert data[0]["name"] == "Unsubmitted Assignment (cohort has submissions)"

@@ -262,7 +262,9 @@ def fetch_fine_grained_data() -> Dict[str, Any]:
                 announcements = announcements.get("announcements", [])
             course_data["announcements"] = extract_announcements_data(announcements)
 
-            assignments = client.get_assignments(course_id, ["assignment_overrides"])
+            assignments = client.get_assignments(
+                course_id, ["assignment_overrides", "submission"]
+            )
             if isinstance(assignments, dict):
                 assignments = assignments.get("assignments", [])
             course_data["assignments"] = extract_assignments_data(assignments)
@@ -346,7 +348,9 @@ def fetch_fine_grained_data_impl(data_folder: Path) -> Dict[str, Any]:
                 announcements = announcements.get("announcements", [])
             course_data["announcements"] = extract_announcements_data(announcements)
 
-            assignments = client.get_assignments(course_id, ["assignment_overrides"])
+            assignments = client.get_assignments(
+                course_id, ["assignment_overrides", "submission"]
+            )
             if isinstance(assignments, dict):
                 assignments = assignments.get("assignments", [])
             course_data["assignments"] = extract_assignments_data(assignments)

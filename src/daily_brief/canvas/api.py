@@ -204,7 +204,12 @@ def extract_assignments_data(assignments: List[Dict[str, Any]]) -> List[Dict[str
     """Extract fine-grained assignment data for AI processing."""
     data = []
     for a in assignments:
-        if a.get("has_submitted_submissions"):
+        sub = a.get("submission")
+        if (
+            isinstance(sub, dict)
+            and sub.get("workflow_state") != "unsubmitted"
+            and sub.get("submitted_at") is not None
+        ):
             continue
 
         due_at = a.get("due_at", "")
