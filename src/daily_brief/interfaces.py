@@ -55,23 +55,22 @@ class AIService(ABC):
     """Interface for AI synthesis services.
 
     This abstraction allows the application to use different AI providers
-    (OpenCode, GPT, etc.) without changing business logic.
+    without changing business logic.
     """
 
     @abstractmethod
-    def synthesize(self, data: dict, prompt: str) -> str:
+    def synthesize(self, data: dict, current_date_str: str) -> str:
         """Synthesize content using AI.
 
         Args:
             data: Raw data to be used as context
-            prompt: Instruction prompt for the AI
+            current_date_str: Current date string in YYYY-MM-DD format
 
         Returns:
-            Generated content as a string
+            Generated content as a markdown string
 
         Invariants:
             - Should raise RuntimeError on failure
-            - May raise FileNotFoundError if OpenCode CLI not available
         """
 
 

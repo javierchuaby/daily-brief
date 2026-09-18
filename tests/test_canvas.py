@@ -53,10 +53,14 @@ class TestCanvasAPIFunctions:
     def test_format_assignment_with_future_date(self):
         """Test assignment formatting with future due date."""
         from daily_brief.canvas.api import format_assignment
+        from datetime import datetime, timedelta, timezone
+
+        future_date = datetime.now(timezone.utc) + timedelta(days=7)
+        due_at = future_date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         assignment = {
             "name": "Assignment 2",
-            "due_at": "2026-09-20T23:59:59Z",
+            "due_at": due_at,
             "points_possible": 50,
             "submissions_count": 0,
         }

@@ -152,7 +152,7 @@ def extract_announcements_data(announcements: Any) -> List[Dict[str, Any]]:
             {
                 "id": _get_attr(a, "id"),
                 "title": _get_attr(a, "title"),
-                "content": _get_attr(a, "content"),
+                "content": strip_html_preserve_urls(_get_attr(a, "content")),
                 "start_time": start_time_sgt.isoformat() if start_time_sgt else None,
                 "end_time": end_time_sgt.isoformat() if end_time_sgt else None,
                 "is_unread": _get_attr(a, "is_unread"),

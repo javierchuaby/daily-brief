@@ -143,14 +143,16 @@ class TestFetchCanvasDataExtraction:
         """Test announcements data extraction."""
         from daily_brief.canvas.api import extract_announcements_data
 
+        from datetime import datetime, timedelta, timezone
+        recent = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT10:00:00Z")
         announcements = [
             {
                 "id": 1,
                 "title": "Announcement 1",
                 "message": "Content 1",
-                "posted_at": "2026-09-10T10:00:00Z",
+                "posted_at": recent,
                 "is_pinned": True,
-                "created_at": "2026-09-10T09:00:00Z",
+                "created_at": recent,
                 "context_code": "course_123",
             }
         ]

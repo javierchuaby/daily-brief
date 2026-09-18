@@ -2,6 +2,6 @@
 
 from daily_brief.services.file_storage import FileStorage
 from daily_brief.services.gmail_sender import GmailSender
-from daily_brief.services.opencode_service import OpenCodeAIService
+from daily_brief.services.gemini_service import GeminiAIService
 
-__all__ = ["GmailSender", "FileStorage", "OpenCodeAIService"]
+__all__ = ["GmailSender", "FileStorage", "GeminiAIService"]

@@ -6,7 +6,7 @@ import pytest
 
 from daily_brief.services.file_storage import FileStorage
 from daily_brief.services.gmail_sender import GmailSender
-from daily_brief.services.opencode_service import OpenCodeAIService
+from daily_brief.services.gemini_service import GeminiAIService
 
 
 class TestGmailSender:
@@ -94,60 +94,36 @@ class TestFileStorage:
         assert filepath.exists()
 
 
-class TestOpenCodeAIService:
-    """Tests for OpenCodeAIService."""
+class TestGeminiAIService:
+    """Tests for GeminiAIService."""
 
     @pytest.fixture
     def service(self):
-        """Create an OpenCodeAIService instance."""
-        return OpenCodeAIService()
+        """Create a GeminiAIService instance."""
+        from daily_brief.services.gemini_service import GeminiAIService
+        with patch('daily_brief.services.gemini_service.genai.Client'):
+            return GeminiAIService()
 
     def test_synthesize_success(self, service):
         """Test successful AI synthesis."""
-        # Setup
         data = {"test": "data"}
-        prompt = "Generate a summary."
-
-        with patch("subprocess.run") as mock_run:
-            mock_result = MagicMock()
-            mock_result.returncode = 0
-            mock_result.stdout = "# Summary\n\nTest content"
-            mock_result.stderr = ""
-            mock_run.return_value = mock_result
-
-            # Act
-            result = service.synthesize(data, prompt)
-
-            # Assert
-            assert "Summary" in result
-            mock_run.assert_called_once()
+        current_date_str = "2026-09-18"
+        
+        mock_interaction = MagicMock()
+        mock_interaction.output_text = '{"urgent": [], "important": [{"source": "Canvas", "title": "HW", "date_str": "2026-09-20", "action_item": "Do it"}], "recent_updates": [], "later_deadlines": []}'
+        service.client.interactions.create.return_value = mock_interaction
+        
+        result = service.synthesize(data, current_date_str)
+        assert "## 📌 IMPORTANT (This Week)" in result
+        assert "Canvas" in result
+        assert "HW" in result
 
     def test_synthesize_failure(self, service):
         """Test AI synthesis failure."""
-        # Setup
         data = {"test": "data"}
-        prompt = "Generate a summary."
-
-        with patch("subprocess.run") as mock_run:
-            mock_result = MagicMock()
-            mock_result.returncode = 1
-            mock_result.stdout = ""
-            mock_result.stderr = "Error occurred"
-            mock_run.return_value = mock_result
-
-            # Act & Assert
-            with pytest.raises(RuntimeError, match="OpenCode AI synthesis failed"):
-                service.synthesize(data, prompt)
-
-    def test_synthesize_opencode_not_found(self, service):
-        """Test AI synthesis when OpenCode CLI not found."""
-        # Setup
-        data = {"test": "data"}
-        prompt = "Generate a summary."
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError("opencode not found")
-
-            # Act & Assert
-            with pytest.raises(FileNotFoundError, match="OpenCode CLI not found"):
-                service.synthesize(data, prompt)
+        current_date_str = "2026-09-18"
+        
+        service.client.interactions.create.side_effect = Exception("API error")
+        
+        with pytest.raises(RuntimeError, match="Gemini AI synthesis failed"):
+            service.synthesize(data, current_date_str)

@@ -7,7 +7,7 @@ Fetches and generates daily brief from Canvas and Coursemology data.
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict
 
@@ -23,7 +23,7 @@ from daily_brief.coursemology import (
     fetch_coursemology_data,
 )
 from daily_brief.interfaces import AIService, EmailSender, StorageInterface
-from daily_brief.services import FileStorage, GmailSender, OpenCodeAIService
+from daily_brief.services import FileStorage, GmailSender, GeminiAIService
 from daily_brief.utils import SGT, parse_sgt_datetime, strip_html_preserve_urls
 
 
@@ -90,10 +90,17 @@ class BriefOrchestrator:
 
     def run(self, data_folder: Path) -> bool:
         try:
+            print("\n[2/4] 📥 Extracting structured data from learning platforms...")
             fine_grained_data = self._fetch_fine_grained_data(data_folder)
             self._save_fine_grained_data(data_folder, fine_grained_data)
+            
+            print("\n[3/4] 🧠 Synthesizing insights with Gemini AI (Model: 3.1-flash-lite)...")
+            print("   ⏳ Generating your daily brief (applying custom schemas)...")
             brief_content = self._synthesize_brief(fine_grained_data, data_folder)
-            return self._send_brief(brief_content)
+            print("   ✓ AI synthesis complete")
+            
+            print("\n[4/4] ✉️  Formatting and dispatching daily brief via email...")
+            return self._send_brief(brief_content, data_folder)
         except Exception as e:
             logging.error(f"Orchestration failed: {e}", exc_info=True)
             return False
@@ -105,15 +112,32 @@ class BriefOrchestrator:
         self.services.storage.save_json(data_folder / "fine_grained.json", data)
 
     def _synthesize_brief(self, data: Dict[str, Any], data_folder: Path) -> str:
-        from daily_brief.synthesizer import synthesize_brief_with_opencode
-
         # Extract current date from folder name (YYYY-MM-DD format)
         current_date_str = data_folder.name
-        return synthesize_brief_with_opencode(data, current_date_str, data_folder)
+        brief_md = self.services.ai_service.synthesize(data, current_date_str)
+        
+        # Save brief.md
+        brief_path = data_folder / "brief.md"
+        with open(brief_path, "w", encoding="utf-8") as f:
+            f.write(brief_md)
+            
+        return brief_md
 
-    def _send_brief(self, content: str) -> bool:
+    def _send_brief(self, content: str, data_folder: Path) -> bool:
         subject = f"Daily Brief - {datetime.now(SGT).strftime('%Y-%m-%d')}"
         recipient = get_env_var("RECIPIENT_EMAIL")
+        
+        # Save email.html (for debugging and transparency)
+        from daily_brief.utils import markdown_to_html
+        
+        html_content = markdown_to_html(content)
+        html_path = data_folder / "email.html"
+        
+        # We can add some basic boilerplate so the standalone file renders nicely in a browser
+        boilerplate_html = f"<html><body style='font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;'>{html_content}</body></html>"
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(boilerplate_html)
+            
         return self.services.email_sender.send(recipient, subject, content)
 
 
@@ -332,6 +356,7 @@ def fetch_fine_grained_data_impl(data_folder: Path) -> Dict[str, Any]:
     data: Dict[str, Any] = {"canvas": {}, "coursemology": {}}
 
     try:
+        print("   --- Canvas ---")
         canvas_token = get_env_var("CANVAS_API_TOKEN")
         canvas_courses_str = get_env_var("CANVAS_COURSES", default="")
         canvas_courses = (
@@ -361,24 +386,44 @@ def fetch_fine_grained_data_impl(data_folder: Path) -> Dict[str, Any]:
             course_data["quizzes"] = extract_quizzes_data(quizzes)
 
             data["canvas"][course_code] = course_data
+            print(f"   ✓ [{course_code}] Canvas data extracted")
     except Exception as e:
         print(f"   ✗ Failed to fetch Canvas fine-grained data: {e}")
 
     try:
+        print("   --- Coursemology ---")
         from coursemology_py import CoursemologyClient
+        import contextlib
+        import io
 
+        print("   ⏳ Authenticating with Coursemology (this may take a few seconds)...")
         client = CoursemologyClient(host="https://coursemology.org")
-        client.login(
-            get_env_var("COURSEMOLOGY_USERNAME"), get_env_var("COURSEMOLOGY_PASSWORD")
-        )
+        
+        # Suppress the raw "Logging in... Login successful." prints from the library
+        with contextlib.redirect_stdout(io.StringIO()):
+            client.login(
+                get_env_var("COURSEMOLOGY_USERNAME"), get_env_var("COURSEMOLOGY_PASSWORD")
+            )
+        print("   🔓 Coursemology authentication successful")
 
         course_id_str = get_env_var("COURSEMOLOGY_COURSE_ID", default="0")
         course_id = int(course_id_str) if course_id_str.isdigit() else 0
 
-        courses = client.courses.index()
-        if courses.courses:
-            if course_id == 0:
-                course_id = courses.courses[0].id
+        course_code = f"Course {course_id}"
+        if course_id != 0:
+            # Bypass coursemology_py Pydantic validation errors by doing a raw GET
+            url = f"{client.courses._base_url}/courses/{course_id}"
+            try:
+                resp = client.courses._session.get(url, params={"format": "json"})
+                if resp.status_code == 200:
+                    raw_course_data = resp.json()
+                    title = raw_course_data.get("course", {}).get("title", "")
+                    if title:
+                        # e.g., "CS2109S - Introduction to AI..." -> "CS2109S"
+                        course_code = title.split()[0]
+            except Exception:
+                pass
+            
             course_api = client.course(course_id)
 
             # Fetch announcements
@@ -481,6 +526,8 @@ def fetch_fine_grained_data_impl(data_folder: Path) -> Dict[str, Any]:
                 )
             except Exception:
                 data["coursemology"]["categories"] = []
+                
+            print(f"   ✓ [{course_code}] Coursemology data extracted")
     except Exception as e:
         import traceback
 
@@ -505,8 +552,24 @@ def main(dry_run: bool = False, verbose: bool = False) -> int:
     print(f"Daily Brief Automation - {datetime.now(SGT).strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'=' * 60}\n")
 
-    print("[1/2] Setting up directories...")
+    print("[1/4] 📂 Setting up workspace...")
     ensure_directories()
+    
+    # Cleanup old data folders to prevent bloat
+    import shutil
+    retention_days = 3
+    cutoff_date = (datetime.now(SGT) - timedelta(days=retention_days)).date()
+    
+    for item in DATA_DIR.iterdir():
+        if item.is_dir() and not item.is_symlink():
+            try:
+                folder_date = datetime.strptime(item.name, "%Y-%m-%d").date()
+                if folder_date < cutoff_date:
+                    shutil.rmtree(item)
+                    print(f"   Removed old data folder: {item.name}")
+            except ValueError:
+                pass # Not a YYYY-MM-DD folder
+
     today = datetime.now(SGT).strftime("%Y-%m-%d")
     date_folder = DATA_DIR / today
     date_folder.mkdir(exist_ok=True)
@@ -514,64 +577,22 @@ def main(dry_run: bool = False, verbose: bool = False) -> int:
     if latest.exists() or latest.is_symlink():
         latest.unlink()
     latest.symlink_to(today)
-    print(f"   Data folder: {date_folder}")
-
-    print("\n[2/2] Fetching Canvas and Coursemology data...")
-
-    try:
-        canvas_token = get_env_var("CANVAS_API_TOKEN")
-        canvas_courses_str = get_env_var("CANVAS_COURSES", default="")
-        canvas_courses = (
-            parse_canvas_courses(canvas_courses_str) if canvas_courses_str else {}
-        )
-        canvas_data = fetch_canvas_data(
-            canvas_token, get_env_var("CANVAS_BASE_URL"), canvas_courses
-        )
-        for course_code, _ in canvas_data.items():
-            print(f"   ✓ {course_code} fetched")
-    except ValueError as e:
-        print(f"   ✗ Invalid Canvas credentials: {e}")
-        logging.error(f"Canvas credentials error: {e}", exc_info=True)
-    except ConnectionError as e:
-        print(f"   ✗ Failed to connect to Canvas: {e}")
-        logging.error(f"Canvas connection error: {e}", exc_info=True)
-    except Exception as e:
-        print(f"   ✗ Failed to fetch Canvas data: {e}")
-        logging.error("Failed to fetch Canvas data", exc_info=True)
-
-    try:
-        fetch_coursemology_data(
-            get_env_var("COURSEMOLOGY_USERNAME"),
-            get_env_var("COURSEMOLOGY_PASSWORD"),
-            int(get_env_var("COURSEMOLOGY_COURSE_ID")),
-        )
-        print("   ✓ Coursemology fetched")
-    except ValueError as e:
-        print(f"   ✗ Invalid Coursemology credentials: {e}")
-        logging.error(f"Coursemology credentials error: {e}", exc_info=True)
-    except ConnectionError as e:
-        print(f"   ✗ Failed to connect to Coursemology: {e}")
-        logging.error(f"Coursemology connection error: {e}", exc_info=True)
-    except Exception as e:
-        print(f"   ✗ Failed to fetch Coursemology data: {e}")
-        logging.error("Failed to fetch Coursemology data", exc_info=True)
+    print(f"   ✓ Workspace ready at {date_folder}\n")
 
     services = OrchestrationServices(
         email_sender=GmailSender(),
         storage=FileStorage(),
-        ai_service=OpenCodeAIService(),
+        ai_service=GeminiAIService(),
     )
 
     orchestrator = BriefOrchestrator(services, dry_run=dry_run)
     success = orchestrator.run(date_folder)
 
     if success:
-        print("\n✓ Daily brief automation complete!")
-        print(f"  Data saved to: {date_folder}")
-        print(f"  Email sent to: {get_env_var('RECIPIENT_EMAIL')}")
+        print(f"\n✨ Daily brief successfully delivered to: {get_env_var('RECIPIENT_EMAIL')}\n")
         return 0
     else:
-        print("\n✗ Daily brief automation failed!")
+        print("\n❌ Daily brief automation failed!\n")
         return 1
 
 
