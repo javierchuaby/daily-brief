@@ -41,12 +41,21 @@ Data is saved to `data/YYYY-MM-DD/` (auto-cleaned after 3 days).
 
 <br>
 
-## ⏰ Automation (Cron)
-To run this automatically every morning at 7:30 AM, add this to your crontab (`crontab -e`):
+## ⏰ Automation (macOS launchd)
+To run this automatically every morning at 7:30 AM, macOS `launchd` is configured.
+Unlike `cron`, if your Mac is asleep at 7:30 AM, `launchd` is smart enough to run the brief immediately when you wake the computer up!
+
+The configuration is located at: `~/Library/LaunchAgents/com.yourname.dailybrief.plist`
+
+**To manage the background job:**
 ```bash
-30 7 * * * cd /path/to/daily-brief && source venv/bin/activate && python3 -m daily_brief >> logs/cron.log 2>&1
+# To stop/disable the daily automation
+launchctl unload ~/Library/LaunchAgents/com.yourname.dailybrief.plist
+
+# To start/enable the daily automation
+launchctl load ~/Library/LaunchAgents/com.yourname.dailybrief.plist
 ```
-*macOS Users:* Ensure `cron`, `Terminal`, or `iTerm2` has "Full Disk Access" in System Settings.
+*Note:* Ensure `Terminal` or `iTerm2` has "Full Disk Access" in macOS System Settings so it can read your credentials.
 
 <br>
 
