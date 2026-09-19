@@ -64,6 +64,20 @@ To change how the AI formats your email, edit the `DailyBriefSchema` and prompt 
 
 <br>
 
+## 📚 API Documentation & Probing
+
+Complete technical documentation verified against live upstream services:
+- **[Canvas LMS API Documentation](docs/api/canvas.md)**: Endpoints, Bearer authentication, pagination, verified response structures, and quirks.
+- **[Coursemology API Documentation](docs/api/coursemology.md)**: Endpoints, session CSRF authentication, student vs staff RBAC permissions, and `coursemology-py` SDK compatibility.
+- **[API Verification Index](docs/api/README.md)**: Full endpoint index and probe methodology.
+
+To run the live endpoint verification suite:
+```bash
+python scripts/probe_endpoints.py
+```
+
+<br>
+
 ## 🙏 Acknowledgments
 
 - Canvas API documentation: https://canvas.instructure.com/doc/api/
